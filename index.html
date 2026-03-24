@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Kadal Cowboy: Sound Update 🦎🔊</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #222; font-family: sans-serif; user-select: none; touch-action: none; }
+        canvas { display: block; }
+        
+        #ui-top {
+            position: absolute; top: 10px; left: 10px; right: 10px;
+            display: flex; justify-content: space-between; pointer-events: none; z-index: 10;
+        }
+        .hp-card { background: rgba(0,0,0,0.7); padding: 8px; border-radius: 12px; width: 130px; border: 2px solid #555; }
+        .hp-bar { width: 100%; height: 12px; background: #222; border-radius: 6px; margin-top: 4px; overflow: hidden; }
+        .hp-fill { height: 100%; width: 100%; transition: width 0.3s; }
+
+        .controls-wrapper {
+            position: absolute; bottom: 20px; width: 100%; height: 210px;
+            display: flex; justify-content: space-between; align-items: flex-end;
+            padding: 0 15px; box-sizing: border-box; pointer-events: none; z-index: 10;
+        }
+
+        .console { display: flex; flex-direction: column; align-items: center; gap: 10px; pointer-events: auto; transition: 0.4s; }
+        .hidden { opacity: 0; pointer-events: none; transform: scale(0.5); }
+
+        .dpad { display: grid; grid-template-columns: repeat(3, 55px); grid-template-rows: repeat(2, 55px); gap: 6px; }
+        .btn {
+            width: 55px; height: 55px; background: rgba(0,0,0,0.4);
+            border: 2px solid rgba(255,255,255,0.4); border-radius: 15px;
+            display: flex; align-items: center; justify-content: center;
+            color: white; font-weight: bold; font-size: 1.3rem; backdrop-filter: blur(4px);
+        }
+        .btn:active { background: #f39c12; transform: scale(0.9); }
+        
+        .action-btns { display: flex; gap: 12px; align-items: center; }
+        .btn-attack { 
+            width: 75px; height: 75px; background: rgba(231, 76, 60, 0.7); 
+            border: 4px solid #fff; border-radius: 50%; font-size: 2rem;
+            display: flex; align-items: center; justify-content: center; color: white;
+        }
+        .btn-swap {
+            width: 50px; height: 50px; background: rgba(52, 152, 219, 0.7);
+            border: 2px solid #fff; border-radius: 12px; font-size: 1.2rem;
+            display: flex; align-items: center; justify-content: center; color: white;
+        }
+
+        #mode-btn {
+            position: absolute; top: 90px; left: 50%; transform: translateX(-50%);
+            pointer-events: auto; background: #f39c12; color: white; border: 2px solid #fff;
+            padding: 10px 20px; border-radius: 25px; font-weight: bold; z-index: 11;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-top">
+        <div class="hp-card">
+            <div style="color:#2ecc71; font-size: 11px; font-weight: bold;">P1 PLAYER</div>
+            <div class="hp-bar"><div id="p1-fill" class="hp-fill" style="background: #2ecc71;"></div></div>
+        </div>
+        <div class="hp-card">
+            <div id="p2-label" style="color:#e67e22; font-size: 11px; font-weight: bold; text-align: right;">NPC KADAL</div>
+            <div class="hp-bar"><div id="p2-fill" class="hp-fill" style="background: #e67e22;"></div></div>
+        </div>
+    </div>
+
+    <button id="mode-btn" onclick="toggleMode()">SWAP MODE (2P)</button>
+    <canvas id="gameCanvas"></canvas>
+
+    <div class="controls-wrapper">
+        <div class="console" id="console-p1">
+            <div class="dpad">
+                <div style="grid-column: 2" class="btn" id="p1-up">▲</div>
+                <div style="grid-column: 1" class="btn" id="p1-left">◀</div>
+                <div style="grid-column: 2" class="btn" id="p1-down">▼</div>
+                <div style="grid-column: 3" class="btn" id="p1-right">▶</div>
+            </div>
+            <div class="action-btns">
+                <div class="btn-swap" id="p1-swap">🔄</div>
+                <div class="btn-attack" id="p1-atk">⚔️</div>
+            </div>
+        </div>
+
+        <div class="console hidden" id="console-p2">
+            <div class="dpad">
+                <div style="grid-column: 2" class="btn" id="p2-up">▲</div>
+                <div style="grid-column: 1" class="btn" id="p2-left">◀</div>
+                <div style="grid-column: 2" class="btn" id="p2-down">▼</div>
+                <div style="grid-column: 3" class="btn" id="p2-right">▶</div>
+            </div>
+            <div class="action-btns">
+                <div class="btn-attack" id="p2-atk">⚔️</div>
+                <div class="btn-swap" id="p2-swap">🔄</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // --- AUDIO SYSTEM (Web Audio API) ---
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        
+        function playSound(type) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+
+            if (type === 'sword') {
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(600, audioCtx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.15);
+            } else if (type === 'shoot') {
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.1);
+                gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+            } else if (type === 'hit') {
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(100, audioCtx.currentTime);
+                gain.gain.setValueAtTime(0.4, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.2);
+            } else if (type === 'heal') {
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(500, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(1000, audioCtx.currentTime + 0.2);
+                gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+                osc.start(); osc.stop(audioCtx.currentTime + 0.3);
+            }
+        }
+
+        let isTwoPlayer = false;
+        let sandParticles = [];
+        let bloodParticles = [];
+        let bullets = [];
+        let damages = [];
+        let props = [];
+        let healthKits = [];
+        let shakeTime = 0;
+        const keys = {};
+
+        const camera = { x: 0, y: 0, zoom: 1, targetX: 0, targetY: 0, targetZoom: 1 };
+
+        const bindTouch = (id, key) => {
+            const el = document.getElementById(id);
+            if(!el) return;
+            el.addEventListener('touchstart', (e) => { e.preventDefault(); keys[key] = true; });
+            el.addEventListener('touchend', (e) => { e.preventDefault(); keys[key] = false; });
+        };
+
+        bindTouch('p1-up', 'w'); bindTouch('p1-down', 's'); bindTouch('p1-left', 'a'); bindTouch('p1-right', 'd'); bindTouch('p1-atk', 'f');
+        bindTouch('p2-up', 'arrowup'); bindTouch('p2-down', 'arrowdown'); bindTouch('p2-left', 'arrowleft'); bindTouch('p2-right', 'arrowright'); bindTouch('p2-atk', 'enter');
+
+        document.getElementById('p1-swap').addEventListener('touchstart', (e) => { e.preventDefault(); p1.swapWeapon(); });
+        document.getElementById('p2-swap').addEventListener('touchstart', (e) => { e.preventDefault(); if(isTwoPlayer) p2.swapWeapon(); });
+
+        function toggleMode() {
+            isTwoPlayer = !isTwoPlayer;
+            document.getElementById('console-p2').classList.toggle('hidden');
+            document.getElementById('mode-btn').innerText = isTwoPlayer ? "MODE: 2P (VS)" : "MODE: 1P (VS NPC)";
+            document.getElementById('p2-label').innerText = isTwoPlayer ? "P2 PLAYER" : "NPC KADAL";
+            resetGame();
+        }
+
+        function resetGame() {
+            p1.hp = 100; p2.hp = 100;
+            p1.x = 200; p2.x = 800;
+            p1.weapon = 0; p2.weapon = 0;
+            bullets = []; healthKits = [];
+        }
+
+        for(let i=0; i<40; i++) sandParticles.push({ x: Math.random()*2000, y: Math.random()*1000, s: Math.random()*2+1 });
+        for(let i=0; i<10; i++) props.push({ x: Math.random()*1500, y: 350 + Math.random()*200, type: 'cactus' });
+
+        setInterval(() => {
+            if(p1.hp > 0 && p2.hp > 0) healthKits.push({ x: 100 + Math.random() * 1400, y: 360 + Math.random() * 220, w: 25, h: 25 });
+        }, 10000);
+
+        class Player {
+            constructor(x, y, color, controls, id) {
+                this.id = id; this.x = x; this.y = y;
+                this.color = color; this.hp = 100;
+                this.controls = controls;
+                this.facing = id === 1 ? 1 : -1;
+                this.isAttacking = false; this.atkTimer = 0; this.canShoot = true;
+                this.anim = 0; this.weapon = 0;
+            }
+
+            swapWeapon() {
+                this.weapon = this.weapon === 0 ? 1 : 0;
+                document.getElementById(this.id === 1 ? 'p1-atk' : 'p2-atk').innerText = this.weapon === 0 ? "⚔️" : "🔫";
+            }
+
+            draw() {
+                this.anim += 0.1;
+                let b = Math.sin(this.anim) * 4;
+                let t = Math.cos(this.anim) * 5;
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.fillStyle = "rgba(0,0,0,0.15)";
+                ctx.beginPath(); ctx.ellipse(0, 0, 25, 6, 0, 0, Math.PI*2); ctx.fill();
+
+                // TAIL
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.moveTo(-this.facing * 8, -15);
+                ctx.quadraticCurveTo(-this.facing * 35 + t, 5 + b, -this.facing * 25, 0); 
+                ctx.fill();
+                
+                // BODY & HAT
+                ctx.fillStyle = this.color;
+                ctx.fillRect(-18, -65+b, 36, 60);
+                ctx.fillRect(this.facing*8, -80+b, 22, 18);
+                ctx.fillStyle = "#5d4037";
+                ctx.fillRect(-22 + this.facing*8, -90+b, 44, 6);
+                ctx.fillRect(-12 + this.facing*8, -105+b, 24, 15);
+                ctx.fillStyle = "white"; ctx.fillRect(this.facing*20, -78+b, 6, 6);
+
+                if (this.weapon === 0) { // Sword
+                    if(this.isAttacking) {
+                        ctx.fillStyle = "rgba(255,255,255,0.4)";
+                        ctx.beginPath(); ctx.arc(0, -35+b, 60, -0.5, 0.5); ctx.fill();
+                        ctx.strokeStyle = "white"; ctx.lineWidth = 6;
+                        ctx.beginPath(); ctx.moveTo(0, -35+b); ctx.lineTo(this.facing*65, -35+b); ctx.stroke();
+                    } else {
+                        ctx.strokeStyle = "#eee"; ctx.lineWidth = 4;
+                        ctx.beginPath(); ctx.moveTo(this.facing*15, -30+b); ctx.lineTo(this.facing*15, -85+b); ctx.stroke();
+                    }
+                } else { // Pistol
+                    ctx.fillStyle = "#333"; ctx.fillRect(this.facing*15, -45+b, this.facing*25, 10);
+                    ctx.fillStyle = "#5d4037"; ctx.fillRect(this.facing*15, -45+b, this.facing*6, 15);
+                }
+                ctx.restore();
+            }
+
+            update() {
+                const c = this.controls;
+                if (this.id === 1 || isTwoPlayer) {
+                    if (keys[c.up]) this.y -= 5; if (keys[c.down]) this.y += 5;
+                    if (keys[c.left]) { this.x -= 5; this.facing = -1; }
+                    if (keys[c.right]) { this.x += 5; this.facing = 1; }
+                    
+                    if (keys[c.atk]) {
+                        if (this.weapon === 0) {
+                            if (!this.isAttacking) { 
+                                this.isAttacking = true; this.atkTimer = 10; 
+                                playSound('sword');
+                                checkHit(this, (this.id===1?p2:p1)); 
+                            }
+                        } else {
+                            if (this.canShoot) { 
+                                shoot(this); this.canShoot = false; 
+                                playSound('shoot');
+                                setTimeout(()=>this.canShoot=true, 300); 
+                            }
+                        }
+                    } else { this.isAttacking = false; }
+                } else {
+                    let dx = p1.x - this.x;
+                    if(Math.abs(dx) > (this.weapon===0?70:250)) this.x += (dx > 0 ? 3 : -3);
+                    this.facing = dx > 0 ? 1 : -1;
+                    if(Math.random() < 0.05) {
+                        if(this.weapon===0 && Math.abs(dx)<80) { 
+                            this.isAttacking=true; playSound('sword'); checkHit(this, p1); 
+                        } else if(this.weapon===1) {
+                            shoot(this); playSound('shoot');
+                        }
+                    }
+                }
+                if(this.atkTimer > 0) this.atkTimer--;
+                
+                healthKits.forEach((k, i) => {
+                    if(Math.abs(this.x - k.x) < 30 && Math.abs(this.y - k.y) < 30) {
+                        this.hp = Math.min(100, this.hp + 20);
+                        healthKits.splice(i, 1);
+                        playSound('heal');
+                        for(let i=0; i<8; i++) bloodParticles.push({x: this.x, y: this.y-30, vx: Math.random()*4-2, vy: Math.random()*4-2, l: 1, c: "#2ecc71"});
+                    }
+                });
+                this.y = Math.max(350, Math.min(600, this.y));
+            }
+        }
+
+        const p1 = new Player(200, 450, "#2ecc71", {up:'w', down:'s', left:'a', right:'d', atk:'f'}, 1);
+        const p2 = new Player(800, 450, "#e67e22", {up:'arrowup', down:'arrowdown', left:'arrowleft', right:'arrowright', atk:'enter'}, 2);
+
+        function checkHit(a, v) {
+            if(Math.abs(a.x - v.x) < 85 && Math.abs(a.y - v.y) < 50) applyDamage(v);
+        }
+
+        function shoot(a) {
+            bullets.push({ x: a.x+(a.facing*40), y: a.y-40, vx: a.facing*15, id: a.id });
+        }
+
+        function applyDamage(v) {
+            v.hp -= 10; shakeTime = 12;
+            playSound('hit');
+            damages.push({x: v.x, y: v.y-120, a: 1});
+            for(let i=0; i<8; i++) bloodParticles.push({x: v.x, y: v.y-40, vx: Math.random()*6-3, vy: Math.random()*6-3, l: 1, c: "#e74c3c"});
+        }
+
+        function updateCamera() {
+            let midX = (p1.x + p2.x) / 2;
+            let midY = (p1.y + p2.y) / 2;
+            let dist = Math.abs(p1.x - p2.x);
+            camera.targetX = -midX * camera.zoom + canvas.width/2;
+            camera.targetY = -midY * camera.zoom + canvas.height/2;
+            camera.targetZoom = Math.max(0.6, Math.min(1.2, 600 / (dist + 200)));
+            camera.x += (camera.targetX - camera.x) * 0.1;
+            camera.y += (camera.targetY - camera.y) * 0.1;
+            camera.zoom += (camera.targetZoom - camera.zoom) * 0.1;
+        }
+
+        function loop() {
+            ctx.clearRect(0,0,canvas.width, canvas.height);
+            updateCamera();
+            ctx.fillStyle = "#ffb347"; ctx.fillRect(0,0,canvas.width, canvas.height);
+            ctx.save();
+            ctx.translate(camera.x * 0.2, 0);
+            ctx.fillStyle = "#e67e22"; ctx.beginPath(); ctx.moveTo(0, 400); ctx.quadraticCurveTo(500, 200, 1500, 400); ctx.lineTo(1500, 1000); ctx.lineTo(0, 1000); ctx.fill();
+            ctx.restore();
+            ctx.save();
+            ctx.translate(camera.x, camera.y);
+            ctx.scale(camera.zoom, camera.zoom);
+            if(shakeTime > 0) { ctx.translate(Math.random()*10-5, Math.random()*10-5); shakeTime--; }
+            ctx.fillStyle = "#edc9af"; ctx.fillRect(-1000, 350, 4000, 1000);
+            props.forEach(p => {
+                ctx.fillStyle = "#2d5a27"; ctx.fillRect(p.x, p.y-40, 15, 40);
+                ctx.fillRect(p.x-10, p.y-30, 10, 5); ctx.fillRect(p.x+15, p.y-25, 10, 5);
+            });
+            healthKits.forEach(k => {
+                ctx.fillStyle = "white"; ctx.fillRect(k.x, k.y, k.w, k.h);
+                ctx.fillStyle = "red"; ctx.fillRect(k.x+10, k.y+4, 5, 17); ctx.fillRect(k.x+4, k.y+10, 17, 5);
+            });
+            p1.update(); p1.draw();
+            p2.update(); p2.draw();
+            bullets.forEach((b, i) => {
+                b.x += b.vx; ctx.fillStyle = "#333"; ctx.fillRect(b.x, b.y, 12, 4);
+                let target = b.id === 1 ? p2 : p1;
+                if(Math.abs(b.x-target.x)<30 && Math.abs(b.y-(target.y-40))<40) { applyDamage(target); bullets.splice(i,1); }
+                if(b.x < -1000 || b.x > 3000) bullets.splice(i,1);
+            });
+            bloodParticles.forEach((p, i) => {
+                p.x += p.vx; p.y += p.vy; p.l -= 0.02;
+                ctx.fillStyle = p.c.replace('rgb','rgba').replace(')', `,${p.l})`); ctx.fillRect(p.x, p.y, 4, 4);
+                if(p.l <= 0) bloodParticles.splice(i, 1);
+            });
+            damages.forEach((d, i) => {
+                d.y -= 1; d.a -= 0.02; ctx.fillStyle = `rgba(255,255,255,${d.a})`;
+                ctx.font = "bold 30px Arial"; ctx.fillText("-10", d.x-20, d.y);
+                if(d.a <= 0) damages.splice(i,1);
+            });
+            sandParticles.forEach(p => {
+                p.x += 2; if(p.x > 2000) p.x = -100;
+                ctx.fillStyle = "rgba(255,255,255,0.3)"; ctx.fillRect(p.x, p.y, p.s, p.s);
+            });
+            ctx.restore();
+            document.getElementById('p1-fill').style.width = p1.hp + "%";
+            document.getElementById('p2-fill').style.width = p2.hp + "%";
+            if(p1.hp <= 0 || p2.hp <= 0) { alert("PERTEMPURAN BERAKHIR!"); resetGame(); }
+            requestAnimationFrame(loop);
+        }
+        loop();
+    </script>
+</body>
+</html>
